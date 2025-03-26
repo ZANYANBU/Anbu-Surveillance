@@ -1,0 +1,39 @@
+# Python-related ignores
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Virtual environment
+venv/
+env/
+
+# Dependencies
+*.egg-info/
+dist/
+build/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-workspace
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Environment variables (security)
+.env
+
+# Compiled models or weights
+*.pt
+*.onnx
+*.tflite
+
+# Jupyter Notebook checkpoints (if used)
+.ipynb_checkpoints/
+
+# Flask cache and session files
+instance/
+*.sqlite3
