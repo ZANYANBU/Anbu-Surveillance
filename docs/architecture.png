@@ -1,0 +1,13 @@
+🛠 Architecture Overview
+Your system includes:
+✅ Camera Feed – Captures live video
+✅ Flask Server – Processes video frames
+✅ YOLO Model – Detects objects (e.g., people, intruders)
+✅ Email Notification – Sends alerts when a person is detected
+✅ GUI Interface – Displays real-time detection
+
+📌 System Flow
+1️⃣ Camera captures video → Frames sent to Flask
+2️⃣ Flask processes frames → YOLO detects objects
+3️⃣ If person detected → Trigger Email Notification
+4️⃣ Display result in GUI
