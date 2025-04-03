@@ -1,0 +1,709 @@
+#!/usr/bin/env python3
+"""
+Anbu Security Surveillance Application
+========================================
+This application uses OpenCV to capture video from one or more cameras,
+detect persons using the YOLO model from Ultralytics, record suspicious events,
+and send email alerts when an intruder is detected.
+
+Features:
+    - User registration, login, forgot password, and forgot user ID dialogs.
+    - Configurable settings for recording duration, camera sources, and email notifications.
+    - Email alerts triggered upon detecting a person with configurable cooldown.
+    - Video recording of events when an intruder is detected.
+    - A clean, modern Tkinter UI.
+    - Detailed logging to help with debugging.
+
+Author: V Anbu Chelvan
+Date: 2025-04-02
+"""
+
+########################################
+#          Import Dependencies         #
+########################################
+
+import cv2
+import smtplib
+import tkinter as tk
+from tkinter import messagebox, Toplevel, Label, StringVar, Entry, Button, Frame, filedialog
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from ultralytics import YOLO
+from threading import Thread, Lock
+import time
+import logging
+import os
+import json
+from cryptography.fernet import Fernet
+from PIL import Image, ImageTk
+import numpy as np
+from datetime import datetime
+
+########################################
+#             Logging Setup            #
+########################################
+
+LOG_FILENAME = "surveillance_app.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    filename=LOG_FILENAME,
+    filemode="a"
+)
+logging.info("Application startup")
+
+########################################
+#         File & Directory Setup       #
+########################################
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+KEY_FILE = os.path.join(BASE_DIR, "secret.key")
+CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
+USERS_FILE = os.path.join(BASE_DIR, "users.json")
+ICON_FILE = r"D:\realme i5 all photos till 2022\IMG_20200727_183327.jpg"
+
+########################################
+#         Encryption Utilities         #
+########################################
+
+def load_key():
+    """Load or generate an encryption key."""
+    if not os.path.exists(KEY_FILE):
+        key = Fernet.generate_key()
+        with open(KEY_FILE, "wb") as f:
+            f.write(key)
+        logging.info("New encryption key generated")
+    else:
+        with open(KEY_FILE, "rb") as f:
+            key = f.read()
+    return key
+
+key = load_key()
+cipher_suite = Fernet(key)
+
+def encrypt_data(plain_text):
+    """Encrypt plaintext using Fernet."""
+    try:
+        return cipher_suite.encrypt(plain_text.encode('utf-8')).decode('utf-8')
+    except Exception as e:
+        logging.error(f"Encryption error: {e}")
+        return plain_text
+
+def decrypt_data(encrypted_text):
+    """Decrypt text encrypted by Fernet."""
+    try:
+        return cipher_suite.decrypt(encrypted_text.encode('utf-8')).decode('utf-8')
+    except Exception as e:
+        logging.error(f"Decryption error: {e}")
+        return encrypted_text
+
+########################################
+#          Configuration Setup         #
+########################################
+
+def load_config():
+    """Load configuration from a JSON file or return defaults."""
+    default_config = {
+        "sender_email": "",
+        "sender_password": "",
+        "receiver_email": "",
+        "recording_duration": 5,    # in minutes
+        "camera_sources": ["0"],
+        "video_save_directory": BASE_DIR,
+        "cooldown_period": 300,     # in seconds
+        "security_question": "What is your favorite color?",
+        "security_answer": encrypt_data("blue")
+    }
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+            default_config.update(config)
+        except Exception as e:
+            logging.error(f"Error loading configuration: {e}")
+    return default_config
+
+def save_config(config):
+    """Save configuration to a JSON file."""
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=4)
+        logging.info("Configuration saved")
+    except Exception as e:
+        logging.error(f"Error saving configuration: {e}")
+
+########################################
+#          User Management             #
+########################################
+
+def load_users():
+    """Load user data from JSON file."""
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logging.error(f"Error loading users: {e}")
+            return []
+    return []
+
+def save_users(users):
+    """Save user data to JSON file."""
+    try:
+        with open(USERS_FILE, "w") as f:
+            json.dump(users, f, indent=4)
+        logging.info("User data saved")
+    except Exception as e:
+        logging.error(f"Error saving users: {e}")
+
+########################################
+#         Email Notification           #
+########################################
+
+def send_email(sender_email, sender_password, recipient_email):
+    """Send an email notification alert."""
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = recipient_email
+        msg['Subject'] = "🚨 Intruder Alert!"
+        body = "A person has been detected in the surveillance area!"
+        msg.attach(MIMEText(body, "plain"))
+        server.sendmail(sender_email, recipient_email, msg.as_string())
+        server.quit()
+        logging.info("Email alert sent")
+    except Exception as e:
+        logging.error(f"Email sending failed: {e}")
+
+########################################
+#       Registration Dialog UI         #
+########################################
+
+def registration_popup(parent):
+    """Popup window to register a new user."""
+    reg_popup = Toplevel(parent)
+    reg_popup.title("Register New User")
+    reg_popup.configure(bg="#f0f8ff")
+    reg_popup.resizable(False, False)
+    reg_popup.grab_set()
+
+    # Username
+    Label(reg_popup, text="Username:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=0, column=0, padx=10, pady=5, sticky="e")
+    username_var = StringVar()
+    Entry(reg_popup, textvariable=username_var, font=("Helvetica", 10)).grid(row=0, column=1, padx=10, pady=5)
+
+    # Password
+    Label(reg_popup, text="Password:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=1, column=0, padx=10, pady=5, sticky="e")
+    password_var = StringVar()
+    Entry(reg_popup, textvariable=password_var, show="*", font=("Helvetica", 10)).grid(row=1, column=1, padx=10, pady=5)
+
+    # Confirm Password
+    Label(reg_popup, text="Confirm Password:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=2, column=0, padx=10, pady=5, sticky="e")
+    conf_password_var = StringVar()
+    Entry(reg_popup, textvariable=conf_password_var, show="*", font=("Helvetica", 10)).grid(row=2, column=1, padx=10, pady=5)
+
+    # Email
+    Label(reg_popup, text="Email:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=3, column=0, padx=10, pady=5, sticky="e")
+    email_var = StringVar()
+    Entry(reg_popup, textvariable=email_var, font=("Helvetica", 10)).grid(row=3, column=1, padx=10, pady=5)
+
+    # Email Notifications Option
+    notif_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(reg_popup, text="Receive email notifications", variable=notif_var, bg="#f0f8ff", font=("Helvetica", 10)).grid(row=4, column=0, columnspan=2, padx=10, pady=5)
+
+    # Security Question and Answer
+    Label(reg_popup, text="Security Question:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=5, column=0, padx=10, pady=5, sticky="e")
+    secq_var = StringVar(value="What is your favorite color?")
+    Entry(reg_popup, textvariable=secq_var, font=("Helvetica", 10)).grid(row=5, column=1, padx=10, pady=5)
+    Label(reg_popup, text="Security Answer:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=6, column=0, padx=10, pady=5, sticky="e")
+    seca_var = StringVar()
+    Entry(reg_popup, textvariable=seca_var, show="*", font=("Helvetica", 10)).grid(row=6, column=1, padx=10, pady=5)
+
+    def register_user():
+        username = username_var.get().strip()
+        password = password_var.get().strip()
+        conf_password = conf_password_var.get().strip()
+        email = email_var.get().strip()
+        receive_notif = notif_var.get()
+        sec_question = secq_var.get().strip()
+        sec_answer = seca_var.get().strip()
+
+        if not (username and password and conf_password and email and sec_question and sec_answer):
+            messagebox.showerror("Error", "All fields are required!")
+            return
+
+        if password != conf_password:
+            messagebox.showerror("Error", "Passwords do not match!")
+            return
+
+        users = load_users()
+        if any(u["username"].lower() == username.lower() for u in users):
+            messagebox.showerror("Error", "Username already exists!")
+            return
+
+        new_user = {
+            "username": username,
+            "password": encrypt_data(password),
+            "email": email,
+            "receive_notification": receive_notif,
+            "security_question": sec_question,
+            "security_answer": encrypt_data(sec_answer)
+        }
+        users.append(new_user)
+        save_users(users)
+        messagebox.showinfo("Success", "Registration successful! You can now log in.")
+        reg_popup.destroy()
+
+    Button(reg_popup, text="Register", command=register_user, bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=7, column=0, columnspan=2, pady=10)
+    reg_popup.wait_window(reg_popup)
+
+########################################
+#       Forgot Password Dialog UI      #
+########################################
+
+def forgot_password_popup(parent):
+    """Popup window to reset password."""
+    fp_popup = Toplevel(parent)
+    fp_popup.title("Forgot Password")
+    fp_popup.configure(bg="#f0f8ff")
+    fp_popup.resizable(False, False)
+    fp_popup.grab_set()
+
+    Label(fp_popup, text="Enter your username:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=0, column=0, padx=10, pady=5)
+    username_var = StringVar()
+    Entry(fp_popup, textvariable=username_var, font=("Helvetica", 10)).grid(row=0, column=1, padx=10, pady=5)
+
+    def next_step():
+        entered_username = username_var.get().strip()
+        users = load_users()
+        user = next((u for u in users if u["username"].lower() == entered_username.lower()), None)
+        if not user:
+            messagebox.showerror("Error", "Username not found!")
+            return
+
+        # Clear popup for next step
+        for widget in fp_popup.winfo_children():
+            widget.destroy()
+
+        sec_question = user.get("security_question", "What is your favorite color?")
+        Label(fp_popup, text="Security Question:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=0, column=0, padx=10, pady=5, columnspan=2)
+        Label(fp_popup, text=sec_question, bg="#f0f8ff", font=("Helvetica", 10)).grid(row=1, column=0, padx=10, pady=5, columnspan=2)
+        Label(fp_popup, text="Your Answer:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=2, column=0, padx=10, pady=5)
+        answer_var = StringVar()
+        Entry(fp_popup, textvariable=answer_var, font=("Helvetica", 10)).grid(row=2, column=1, padx=10, pady=5)
+
+        def check_answer():
+            answer = answer_var.get().strip().lower()
+            stored_answer = decrypt_data(user.get("security_answer", encrypt_data("blue"))).lower()
+            if answer != stored_answer:
+                messagebox.showerror("Error", "Incorrect answer!")
+                return
+
+            for widget in fp_popup.winfo_children():
+                widget.destroy()
+            Label(fp_popup, text="Enter New Password:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=0, column=0, padx=10, pady=5)
+            new_password_var = StringVar()
+            Entry(fp_popup, textvariable=new_password_var, show="*", font=("Helvetica", 10)).grid(row=0, column=1, padx=10, pady=5)
+            Label(fp_popup, text="Confirm New Password:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=1, column=0, padx=10, pady=5)
+            confirm_password_var = StringVar()
+            Entry(fp_popup, textvariable=confirm_password_var, show="*", font=("Helvetica", 10)).grid(row=1, column=1, padx=10, pady=5)
+
+            def reset_password():
+                new_pass = new_password_var.get().strip()
+                confirm_pass = confirm_password_var.get().strip()
+                if not new_pass:
+                    messagebox.showerror("Error", "Password cannot be empty!")
+                    return
+                if new_pass != confirm_pass:
+                    messagebox.showerror("Error", "Passwords do not match!")
+                    return
+
+                user["password"] = encrypt_data(new_pass)
+                users = load_users()
+                for i, u in enumerate(users):
+                    if u["username"].lower() == entered_username.lower():
+                        users[i] = user
+                        break
+                save_users(users)
+                messagebox.showinfo("Success", "Password has been reset. You can now log in with your new password.")
+                fp_popup.destroy()
+
+            Button(fp_popup, text="Reset Password", command=reset_password, bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=2, column=0, columnspan=2, pady=10)
+
+        Button(fp_popup, text="Submit Answer", command=check_answer, bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=3, column=0, columnspan=2, pady=10)
+
+    Button(fp_popup, text="Next", command=next_step, bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=1, column=0, columnspan=2, pady=10)
+    fp_popup.wait_window(fp_popup)
+
+########################################
+#        Forgot User ID Dialog UI      #
+########################################
+
+def forgot_userid_popup(parent):
+    """Popup to retrieve forgotten user ID."""
+    fu_popup = Toplevel(parent)
+    fu_popup.title("Forgot User ID")
+    fu_popup.configure(bg="#f0f8ff")
+    fu_popup.resizable(False, False)
+    fu_popup.grab_set()
+
+    Label(fu_popup, text="Enter your registered email:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=0, column=0, padx=10, pady=5)
+    email_var = StringVar()
+    Entry(fu_popup, textvariable=email_var, font=("Helvetica", 10)).grid(row=0, column=1, padx=10, pady=5)
+
+    def verify_email():
+        entered_email = email_var.get().strip().lower()
+        users = load_users()
+        user = next((u for u in users if u["email"].lower() == entered_email), None)
+        if not user:
+            messagebox.showerror("Error", "No user found with that email.")
+            fu_popup.destroy()
+            return
+        messagebox.showinfo("User ID", f"Your User ID is: {user.get('username', 'Unknown')}")
+        fu_popup.destroy()
+
+    Button(fu_popup, text="Submit", command=verify_email, bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=1, column=0, columnspan=2, pady=10)
+    fu_popup.wait_window(fu_popup)
+
+########################################
+#            Login Screen UI           #
+########################################
+
+def show_login_screen(root):
+    """Display the login dialog and return the logged-in user."""
+    users = load_users() or []
+    login_popup = Toplevel(root)
+    login_popup.title("Login")
+    login_popup.configure(bg="#f0f8ff")
+    login_popup.resizable(False, False)
+    login_popup.grab_set()
+
+    Label(login_popup, text="Username:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=0, column=0, padx=10, pady=5)
+    Label(login_popup, text="Password:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=1, column=0, padx=10, pady=5)
+
+    username_var = StringVar()
+    password_var = StringVar()
+
+    Entry(login_popup, textvariable=username_var, font=("Helvetica", 10)).grid(row=0, column=1, padx=10, pady=5)
+    Entry(login_popup, textvariable=password_var, show="*", font=("Helvetica", 10)).grid(row=1, column=1, padx=10, pady=5)
+
+    Label(login_popup, text="New user? Click Register.", fg="red", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=2, column=0, columnspan=2, padx=10, pady=5)
+
+    logged_in_user = None
+
+    def attempt_login():
+        nonlocal logged_in_user
+        entered_username = username_var.get().strip()
+        entered_password = password_var.get().strip()
+        user = next((u for u in users if u["username"].lower() == entered_username.lower()), None)
+        if user and decrypt_data(user["password"]) == entered_password:
+            messagebox.showinfo("Welcome", f"Hello {entered_username}, welcome to Anbu Security!")
+            logged_in_user = user
+            login_popup.destroy()
+        else:
+            messagebox.showerror("Login Failed", "Incorrect username or password")
+
+    Button(login_popup, text="Login", command=attempt_login, bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=3, column=0, columnspan=2, pady=10)
+    Button(login_popup, text="Register", command=lambda: registration_popup(login_popup), bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=4, column=0, pady=5)
+    Button(login_popup, text="Forgot Password", command=lambda: forgot_password_popup(login_popup), bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=4, column=1, pady=5)
+    Button(login_popup, text="Forgot User ID", command=lambda: forgot_userid_popup(login_popup), bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=5, column=0, columnspan=2, pady=5)
+
+    login_popup.transient(root)
+    root.wait_window(login_popup)
+    return logged_in_user
+
+########################################
+#      Surveillance Application UI     #
+########################################
+
+class SurveillanceApp:
+    def __init__(self, root, user):
+        self.root = root
+        self.current_user = user
+        self.root.title("Anbu - Home Security Surveillance")
+        self.root.configure(bg="#121212")
+        self.video_running = False
+        self.cameras = {}         # {source: cv2.VideoCapture}
+        self.camera_threads = {}  # Threads for each camera feed
+        self.canvas_dict = {}     # Tkinter canvas per feed
+        self.lock = Lock()        # For thread-safe frame access
+        self.last_alert_time = {} # Per-camera alert timestamps
+
+        # Load configuration
+        self.config = load_config()
+        self.cooldown_period = self.config.get("cooldown_period", 300)
+        self.recording_duration = self.config.get("recording_duration", 5)
+        self.camera_sources = self.config.get("camera_sources", ["0"])
+        self.video_save_directory = self.config.get("video_save_directory", BASE_DIR)
+        self.feed_frames = {}     # Latest frame per camera source
+
+        # Attempt to load the YOLO model for detection
+        try:
+            self.model = YOLO("yolov5s.pt")
+            logging.info("YOLO model loaded successfully")
+        except Exception as e:
+            logging.error(f"Error loading YOLO model: {e}")
+            self.model = None
+
+        self.create_ui()
+
+    def create_ui(self):
+        """Setup the main UI components."""
+        header = Label(self.root, text="Anbu Surveillance System", font=("Arial", 20, "bold"),
+                       fg="white", bg="#121212")
+        header.pack(pady=10)
+
+        subheader = Label(self.root, text="Your Smart Home Security Solution", font=("Arial", 14),
+                          fg="#dddddd", bg="#121212")
+        subheader.pack(pady=5)
+
+        # Frame for camera feeds
+        self.feeds_frame = Frame(self.root, bg="#121212")
+        self.feeds_frame.pack(pady=10)
+
+        for idx, src in enumerate(self.camera_sources):
+            canvas = tk.Canvas(self.feeds_frame, width=640, height=480, bg="black")
+            canvas.grid(row=idx // 2, column=idx % 2, padx=5, pady=5)
+            self.canvas_dict[src] = canvas
+
+        # Control buttons frame
+        controls_frame = Frame(self.root, bg="#121212")
+        controls_frame.pack(pady=10)
+        Button(controls_frame, text="Start Surveillance", command=self.start_surveillance,
+               height=2, width=20, bg="#008080", fg="white", font=("Arial", 12, "bold")).grid(row=0, column=0, padx=5)
+        Button(controls_frame, text="Settings", command=self.show_settings,
+               height=2, width=20, bg="#008080", fg="white", font=("Arial", 12, "bold")).grid(row=0, column=1, padx=5)
+        Button(controls_frame, text="Exit", command=self.stop_surveillance,
+               height=2, width=20, bg="#D32F2F", fg="white", font=("Arial", 12, "bold")).grid(row=0, column=2, padx=5)
+
+    def show_settings(self):
+        """Display the settings popup to modify configuration."""
+        settings_popup = Toplevel(self.root)
+        settings_popup.title("Settings")
+        settings_popup.configure(bg="#f0f8ff")
+        settings_popup.resizable(False, False)
+        settings_popup.grab_set()
+
+        Label(settings_popup, text="Recording Duration (min):", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=0, column=0, padx=10, pady=5, sticky="e")
+        duration_entry = Entry(settings_popup, width=10, font=("Helvetica", 10))
+        duration_entry.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+        duration_entry.insert(0, str(self.recording_duration))
+
+        Label(settings_popup, text="Camera Sources (comma-separated):", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=1, column=0, padx=10, pady=5, sticky="e")
+        camera_entry = Entry(settings_popup, width=30, font=("Helvetica", 10))
+        camera_entry.grid(row=1, column=1, padx=10, pady=5)
+        camera_entry.insert(0, ",".join(self.camera_sources))
+
+        Label(settings_popup, text="Video Save Directory:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=2, column=0, padx=10, pady=5, sticky="e")
+        save_dir_entry = Entry(settings_popup, width=30, font=("Helvetica", 10))
+        save_dir_entry.grid(row=2, column=1, padx=10, pady=5)
+        save_dir_entry.insert(0, self.video_save_directory)
+        Button(settings_popup, text="Browse", command=lambda: (
+            save_dir_entry.delete(0, tk.END),
+            save_dir_entry.insert(0, filedialog.askdirectory())
+        ), font=("Helvetica", 10, "bold"), bg="#008080", fg="white").grid(row=2, column=2, padx=5, pady=5)
+
+        Label(settings_popup, text="Sender Email:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=3, column=0, padx=10, pady=5, sticky="e")
+        sender_entry = Entry(settings_popup, width=30, font=("Helvetica", 10))
+        sender_entry.grid(row=3, column=1, padx=10, pady=5)
+        sender_entry.insert(0, self.config.get("sender_email") or "")
+
+        Label(settings_popup, text="Sender App Password:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=4, column=0, padx=10, pady=5, sticky="e")
+        sender_pass_entry = Entry(settings_popup, width=30, show="*", font=("Helvetica", 10))
+        sender_pass_entry.grid(row=4, column=1, padx=10, pady=5)
+        sender_pass_entry.insert(0, self.config.get("sender_password") or "")
+
+        Label(settings_popup, text="Receiver Email:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=5, column=0, padx=10, pady=5, sticky="e")
+        receiver_entry = Entry(settings_popup, width=30, font=("Helvetica", 10))
+        receiver_entry.grid(row=5, column=1, padx=10, pady=5)
+        receiver_entry.insert(0, self.config.get("receiver_email") or "")
+
+        Label(settings_popup, text="Security Question:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=6, column=0, padx=10, pady=5, sticky="e")
+        secq_entry = Entry(settings_popup, width=30, font=("Helvetica", 10))
+        secq_entry.grid(row=6, column=1, padx=10, pady=5)
+        secq_entry.insert(0, self.config.get("security_question") or "What is your favorite color?")
+
+        Label(settings_popup, text="Security Answer:", bg="#f0f8ff", font=("Helvetica", 10)).grid(row=7, column=0, padx=10, pady=5, sticky="e")
+        seca_entry = Entry(settings_popup, width=30, show="*", font=("Helvetica", 10))
+        seca_entry.grid(row=7, column=1, padx=10, pady=5)
+
+        def save_settings():
+            try:
+                self.recording_duration = int(duration_entry.get().strip())
+            except ValueError:
+                messagebox.showerror("Error", "Recording duration must be an integer.")
+                return
+            sources = camera_entry.get().strip()
+            if sources:
+                self.camera_sources = [s.strip() for s in sources.split(",")]
+            else:
+                messagebox.showerror("Error", "At least one camera source is required.")
+                return
+            self.video_save_directory = save_dir_entry.get().strip()
+            if not os.path.isdir(self.video_save_directory):
+                messagebox.showerror("Error", "Invalid save directory.")
+                return
+
+            self.config["recording_duration"] = self.recording_duration
+            self.config["camera_sources"] = self.camera_sources
+            self.config["video_save_directory"] = self.video_save_directory
+            self.config["sender_email"] = sender_entry.get().strip()
+            self.config["sender_password"] = sender_pass_entry.get().strip()
+            self.config["receiver_email"] = receiver_entry.get().strip()
+            self.config["security_question"] = secq_entry.get().strip()
+            self.config["security_answer"] = encrypt_data(seca_entry.get().strip())
+            save_config(self.config)
+            messagebox.showinfo("Settings Saved", "Settings updated successfully.")
+            settings_popup.destroy()
+            self.reset_feeds()
+
+        Button(settings_popup, text="Save", command=save_settings, width=20, bg="#008080", fg="white", font=("Helvetica", 10, "bold")).grid(row=8, column=0, columnspan=2, pady=10)
+        settings_popup.wait_window(settings_popup)
+
+    def reset_feeds(self):
+        """Reset camera feed canvases after settings change."""
+        self.stop_surveillance()
+        for canvas in list(self.canvas_dict.values()):
+            if canvas.winfo_exists():
+                canvas.destroy()
+        self.canvas_dict.clear()
+        for idx, src in enumerate(self.camera_sources):
+            canvas = tk.Canvas(self.feeds_frame, width=640, height=480, bg="black")
+            canvas.grid(row=idx // 2, column=idx % 2, padx=5, pady=5)
+            self.canvas_dict[src] = canvas
+
+    def start_surveillance(self):
+        """Begin capturing video from all configured camera sources."""
+        self.video_running = True
+        for src in self.camera_sources:
+            self.last_alert_time[src] = 0
+            try:
+                cap = cv2.VideoCapture(int(src)) if src.isdigit() else cv2.VideoCapture(src)
+                if not cap.isOpened():
+                    logging.error(f"Failed to open camera source: {src}")
+                    continue
+            except Exception as e:
+                logging.error(f"Error opening camera {src}: {e}")
+                continue
+            self.cameras[src] = cap
+            thread = Thread(target=self.video_loop, args=(src,), daemon=True)
+            self.camera_threads[src] = thread
+            thread.start()
+
+    def video_loop(self, src):
+        """Continuously capture frames from the camera and update UI."""
+        cap = self.cameras[src]
+        while self.video_running and cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                logging.error(f"Failed to read frame from camera {src}")
+                break
+            with self.lock:
+                self.feed_frames[src] = frame.copy()
+            self.update_canvas(src, frame)
+            # If model is loaded and detection occurs, check cooldown and trigger actions
+            if self.model and self.detect_person(frame) and time.time() - self.last_alert_time[src] > self.cooldown_period:
+                self.last_alert_time[src] = time.time()
+                if self.current_user.get("receive_notification", False):
+                    sender_email = self.config.get("sender_email")
+                    sender_password = self.config.get("sender_password")
+                    recipient_email = self.current_user.get("email") or self.config.get("receiver_email")
+                    if sender_email and sender_password and recipient_email:
+                        Thread(target=send_email, args=(sender_email, sender_password, recipient_email), daemon=True).start()
+                Thread(target=self.start_recording, args=(src,), daemon=True).start()
+            time.sleep(0.03)
+        cap.release()
+
+    def detect_person(self, frame):
+        """Use YOLO model to detect if a person is in the frame."""
+        try:
+            results = self.model(frame)[0]
+            for box in results.boxes:
+                cls = int(box.cls[0].item())
+                if self.model.names[cls] == 'person':
+                    logging.info("Person detected")
+                    return True
+        except Exception as e:
+            logging.error(f"Detection error: {e}")
+        return False
+
+    def start_recording(self, src):
+        """Record video from the current feed if an intruder is detected."""
+        if getattr(self, f"recording_{src}", False):
+            return
+        setattr(self, f"recording_{src}", True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(self.video_save_directory, f"recording_{src}_{timestamp}.avi")
+        frame = self.feed_frames.get(src)
+        if frame is None:
+            logging.error(f"No frame available for recording from {src}")
+            setattr(self, f"recording_{src}", False)
+            return
+        height, width = frame.shape[:2]
+        fourcc = cv2.VideoWriter_fourcc(*"XVID")
+        out = cv2.VideoWriter(filename, fourcc, 10, (width, height))
+        start_time = time.time()
+        logging.info(f"Started recording for camera {src} to file {filename}")
+        while time.time() - start_time < self.recording_duration * 60 and self.video_running:
+            with self.lock:
+                current_frame = self.feed_frames.get(src)
+            if current_frame is not None:
+                out.write(current_frame)
+            time.sleep(0.1)
+        out.release()
+        setattr(self, f"recording_{src}", False)
+        logging.info(f"Finished recording for camera {src}")
+
+    def update_canvas(self, src, frame):
+        """Convert frame to Tkinter image and update corresponding canvas."""
+        try:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            image = Image.fromarray(rgb_frame)
+            imgtk = ImageTk.PhotoImage(image=image)
+            canvas = self.canvas_dict.get(src)
+            if canvas:
+                canvas.create_image(0, 0, image=imgtk, anchor=tk.NW)
+                canvas.imgtk = imgtk
+            self.root.update_idletasks()
+        except Exception as e:
+            logging.error(f"Canvas update error for source {src}: {e}")
+
+    def stop_surveillance(self):
+        """Stop video capture and close the application."""
+        self.video_running = False
+        time.sleep(0.5)
+        for cap in self.cameras.values():
+            if cap.isOpened():
+                cap.release()
+        logging.info("Stopping surveillance and closing application")
+        self.root.destroy()
+
+########################################
+#              Main Execution          #
+########################################
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    # Set custom app icon
+    try:
+        if os.path.exists(ICON_FILE):
+            logo_img = Image.open(ICON_FILE)
+            logo = ImageTk.PhotoImage(logo_img)
+            root.iconphoto(False, logo)
+    except Exception as e:
+        logging.error(f"Failed to set app icon: {e}")
+
+    root.geometry("800x800")
+    root.configure(bg="#121212")
+
+    # Display login screen
+    logged_in_user = show_login_screen(root)
+    if logged_in_user is None:
+        logging.info("No user logged in; closing application")
+        root.destroy()
+    else:
+        app = SurveillanceApp(root, logged_in_user)
+        root.mainloop()
