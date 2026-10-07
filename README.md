@@ -99,8 +99,7 @@ Anbu is a Python-based smart home security system developed by V Anbu Chelvan.
 
 ## Screenshots / Demo
 
-&#x20;*Figure: Example of a security camera (placeholder).*
-This placeholder image is not the actual GUI but an example. In practice, include **screenshots** of the Tkinter interface (e.g. login screen, live view with detections) and any **demo video** links (for example, a YouTube video) to illustrate the application in action.
+The screenshots at the top of this page show the camera setup dialog and a live detection.
 
 ## Security Considerations
 
