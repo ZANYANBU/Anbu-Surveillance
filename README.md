@@ -1,8 +1,12 @@
 
 # Anbu Surveillance System
 
-&#x20;*Figure: Example surveillance cameras (placeholder).*
+<p align="center"><img src="assets/detection.png" alt="A person detected in the live camera feed, outlined with a green box" width="760"></p>
+<p align="center"><i>Live feed with a person detected. The same event triggers the recording and the email alert.</i></p>
+
 Anbu is a Python-based smart home security system developed by V Anbu Chelvan. It leverages computer vision for **real-time person detection** using an Ultralytics YOLO model (e.g. YOLOv5). The system monitors **multiple camera** feeds simultaneously and alerts the user via email whenever a person (intruder) is detected. A Tkinter-based GUI provides an easy way to register/login, add camera streams, and view live video with detection overlays. Detected events (snapshots or video clips) are recorded for later review, and all sensitive settings (like SMTP credentials) are stored in a JSON file encrypted with Fernet.
+
+<p align="center"><img src="assets/camera-setup.png" alt="The camera setup dialog: webcam, external camera or RTSP address" width="420"></p>
 
 ## Features
 
