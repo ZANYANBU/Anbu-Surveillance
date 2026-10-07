@@ -51,7 +51,7 @@ Anbu is a Python-based smart home security system developed by V Anbu Chelvan.
 5. **Run the app:**
 
    ```bash
-   python anbu.py
+   python anbu_security.py
    ```
 
    *(If multiple Python versions are installed, you may need `python3`.)*
@@ -76,7 +76,7 @@ Anbu is a Python-based smart home security system developed by V Anbu Chelvan.
 5. **Run the app:**
 
    ```bash
-   python3 anbu.py
+   python3 anbu_security.py
    ```
 
 ## Model Requirements
@@ -87,7 +87,7 @@ Anbu is a Python-based smart home security system developed by V Anbu Chelvan.
 
 ## Usage Guide
 
-1. **Launch the Application:** After setup, run `anbu.py`. The login window will appear.
+1. **Launch the Application:** After setup, run `anbu_security.py`. The login window will appear.
 2. **Register/Login:** If running for the first time, click *Register* to create a new account (this saves your username in the local SQLite DB). Then log in with your credentials.
 3. **Add Cameras:** In the GUI, use the *Add Camera* option to enter camera sources. These can be device indices (like `0`, `1`, for webcams) or video stream URLs (e.g. RTSP). Each added camera will appear in the list.
 4. **Start Monitoring:** Click the *Start* button. Live feeds from all configured cameras will display, with detected persons outlined.
@@ -129,4 +129,11 @@ This project is released under the **MIT License**. See [LICENSE](LICENSE) for d
 
 **References:** Ultralytics YOLO documentation; YOLO security alarm guides; Python email/Tkinter tutorials; SQLite and Fernet official docs.
 
+## Files
 
+| File | What it is |
+|---|---|
+| `anbu_security.py` | The full application: login, multi-camera monitoring, recording, email alerts, encrypted config. |
+| `anbu.py` | The original minimal detector: one camera, YOLO, email alert. A good place to start reading. |
+| `legacy/earlier_version.py` | An earlier iteration of the full application, kept for reference. |
+| `docs/setup_guide.md` | Step-by-step setup for Windows, macOS and Linux. |

@@ -14,7 +14,7 @@ Features:
     - A clean, modern Tkinter UI.
     - Detailed logging to help with debugging.
 
-Author: Your Name
+Author: V Anbu Chelvan
 Date: 2025-04-02
 """
 
